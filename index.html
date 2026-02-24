@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notion-like Workspace</title>
+
+    <!-- React & ReactDOM (UMD via CDN) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+    <!-- Babel (In-browser JSX compilation) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Tailwind CSS (CDN for styling) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+            background-color: #ffffff;
+            color: #37352f;
+            margin: 0;
+            overflow: hidden;
+            /* Prevent body scroll, handle inside components */
+        }
+
+        /* Glassmorphism effects */
+        .glass-sidebar {
+            background: rgba(247, 246, 243, 0.85);
+            /* Slightly transparent Notion gray */
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-right: 1px solid rgba(233, 233, 231, 0.5);
+        }
+
+        .glass-modal {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.15), 0 0 1px 1px rgba(0, 0, 0, 0.05);
+            /* Soft, premium shadow */
+        }
+
+        /* Notion-like custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* Using transform over top/left for performance */
+        .modal-overlay {
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .modal-overlay.open {
+            opacity: 1;
+        }
+
+        .modal-content {
+            transform: scale(0.95) translateY(10px);
+            opacity: 0;
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+            will-change: transform, opacity;
+            /* GPU Hint */
+        }
+
+        .modal-content.open {
+            transform: scale(1) translateY(0);
+            opacity: 1;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            pointer-events: none;
+        }
+
+        .toast-container>* {
+            pointer-events: auto;
+        }
+
+        @keyframes slide-in-right {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .animate-slide-in-right {
+            animation: slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes scale-up {
+            from {
+                transform: scale(0.95);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .animate-scale-up {
+            animation: scale-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // -------------------------------------------------------------
+        // Data & State Management
+        // -------------------------------------------------------------
+        const BOARDS = [
+            { id: 'board1', name: '업무 공유', icon: 'zap' },
+            { id: 'board2', name: '스케줄 캘린더', icon: 'calendar' },
+            { id: 'board3', name: '게시판 3', icon: 'file-text' }
+        ];
+
+        // Initial mock data
+        const initialPosts = {
+            board1: [
+                { id: 1, title: '웹 성능 최적화 가이드', content: 'Transform과 requestAnimationFrame을 활용하세요.', date: '2026-02-24', author: '작성자' },
+                { id: 2, title: 'React 18 새로운 기능', content: 'Concurrent mode...', date: '2026-02-23', author: '프론트엔드' }
+            ],
+            board2: [
+                { id: 4, title: '공정관리팀 주간 회의', content: '오후 2시 대회의실', date: '2026-02-24', author: '시스템', type: 'event' },
+                { id: 5, title: '신입 팀원 환영회 (회식)', content: '오후 6시 명동 숯불갈비', date: '2026-02-27', author: '시스템', type: 'event' }
+            ],
+            board3: []
+        };
+
+        // -------------------------------------------------------------
+        // Components
+        // -------------------------------------------------------------
+
+        // 0. Icon Helper (Fix for instability: directly inject SVG instead of causing DOM mutations via createIcons)
+        const Icon = ({ name, className }) => {
+            const iconSvg = lucide.icons[name];
+            if (!iconSvg) return null;
+
+            // Convert Lucide DOM element to string to inject safely
+            const svgString = iconSvg.toSvg({ class: className, width: 20, height: 20 });
+            return <div className="inline-flex items-center justify-center flex-shrink-0" dangerouslySetInnerHTML={{ __html: svgString }} />;
+        };
+
+
+        // 1. Sidebar Component
+        const Sidebar = ({ boards, activeBoard, setActiveBoard, onRenameBoard, visitorCount, userInfo, visitorList }) => {
+            const [editingBoardId, setEditingBoardId] = React.useState(null);
+            const [editName, setEditName] = React.useState("");
+
+            const handleEditStart = (e, board) => {
+                e.stopPropagation();
+                setEditingBoardId(board.id);
+                setEditName(board.name);
+            };
+
+            const handleEditSave = (boardId) => {
+                if (editName.trim()) {
+                    onRenameBoard(boardId, editName.trim());
+                }
+                setEditingBoardId(null);
+            };
+
+            const handleKeyDown = (e, boardId) => {
+                if (e.key === 'Enter') handleEditSave(boardId);
+                if (e.key === 'Escape') setEditingBoardId(null);
+            };
+
+            return (
+                <div className="w-[240px] h-screen glass-sidebar flex flex-col transition-all duration-300 flex-shrink-0 z-10">
+                    {/* Workspace Header */}
+                    <div className="h-12 flex items-center px-4 hover:bg-gray-100/50 cursor-pointer transition-colors mt-2 mx-2 rounded-md">
+                        <div className="w-5 h-5 bg-blue-600 text-white rounded-[4px] flex items-center justify-center text-xs font-bold mr-2 text-[10px]">
+                        </div>
+                        <span className="font-semibold text-[13px] tracking-tight">공정관리팀 Work Space</span>
+                    </div>
+
+                    <div className="mt-6 px-3 flex-1 overflow-y-auto noscroll">
+                        <div className="text-[11px] font-semibold text-gray-400 mb-1 px-2 uppercase tracking-wider flex justify-between items-center group">
+                            <span>Boards</span>
+                        </div>
+                        <div className="space-y-[2px] mb-8">
+                            {boards.map(board => (
+                                <div
+                                    key={board.id}
+                                    onClick={() => setActiveBoard(board.id)}
+                                    className={`w-full flex items-center justify-between px-2 py-[6px] rounded-md text-[14px] transition-colors cursor-pointer group ${activeBoard === board.id
+                                        ? 'bg-gray-200/60 font-medium text-black'
+                                        : 'text-gray-600 hover:bg-gray-100/60'
+                                        }`}
+                                >
+                                    <div className="flex items-center flex-1 min-w-0">
+                                        <Icon name={board.icon} className={`w-[18px] h-[18px] mr-2 stroke-[2] ${activeBoard === board.id ? 'stroke-black' : 'stroke-gray-400'}`} />
+                                        {editingBoardId === board.id ? (
+                                            <input
+                                                autoFocus
+                                                type="text"
+                                                value={editName}
+                                                onChange={(e) => setEditName(e.target.value)}
+                                                onBlur={() => handleEditSave(board.id)}
+                                                onKeyDown={(e) => handleKeyDown(e, board.id)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="bg-white border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-1 w-full text-[13px] outline-none"
+                                            />
+                                        ) : (
+                                            <span className="truncate">{board.name}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Current Visitors List */}
+                        <div className="mt-6 px-2">
+                            <div className="text-[10px] font-bold text-gray-400 mb-3 uppercase tracking-tighter flex items-center">
+                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full mr-2"></div>
+                                접속 중인 사용자 명단
+                            </div>
+                            <div className="space-y-3">
+                                <div className="flex items-center group">
+                                    <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold mr-2 ring-2 ring-blue-100">
+                                        {userInfo?.name ? userInfo.name[0] : '나'}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-[12px] font-bold text-gray-800 truncate">{userInfo?.name || '나'} <span className="font-normal text-gray-500 ml-1">{userInfo?.position || '(미등록)'}</span></p>
+                                        <p className="text-[9px] text-blue-500 font-bold">You (Online)</p>
+                                    </div>
+                                </div>
+                                {visitorList.map((user, idx) => (
+                                    <div key={idx} className="flex items-center grayscale opacity-80 hover:grayscale-0 hover:opacity-100 transition-all">
+                                        <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-[10px] font-bold mr-2 shadow-sm">
+                                            {user.name[0]}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-[12px] font-medium text-gray-600 truncate">{user.name} <span className="text-gray-400 ml-1 text-[11px]">{user.position}</span></p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Bottom Utility Buttons */}
+                    <div className="p-4 space-y-2 border-t border-gray-100/50">
+                        <button
+                            onClick={() => window.dispatchEvent(new CustomEvent('open-user-registration'))}
+                            className="w-full flex items-center px-3 py-2 rounded-md text-[13px] bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all font-bold"
+                        >
+                            <Icon name="user-plus" className="w-4 h-4 mr-2" />
+                            정보 등록
+                        </button>
+                        <button
+                            onClick={() => window.dispatchEvent(new CustomEvent('open-notification-settings'))}
+                            className="w-full flex items-center px-3 py-2 rounded-md text-[13px] text-gray-500 hover:text-gray-800 hover:bg-gray-100/60 transition-all font-medium"
+                        >
+                            <Icon name="bell" className="w-4 h-4 mr-2" />
+                            알림 설정
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // 2. Post Editor Modal Component
+        const PostEditor = ({ isOpen, onClose, onSave, activeBoardName, initialData, targetDate, isCalendar }) => {
+            const [title, setTitle] = React.useState('');
+            const [content, setContent] = React.useState('');
+            const [link, setLink] = React.useState('');
+            const [startDate, setStartDate] = React.useState('');
+            const [endDate, setEndDate] = React.useState('');
+
+            // Reset when opened
+            React.useEffect(() => {
+                if (isOpen) {
+                    if (initialData) {
+                        setTitle(initialData.title);
+                        setContent(initialData.content);
+                        setLink(initialData.link || '');
+                        setStartDate(initialData.date || '');
+                        setEndDate(initialData.endDate || '');
+                    } else {
+                        setTitle('');
+                        setContent('');
+                        setLink('');
+                        setStartDate(targetDate || '');
+                        setEndDate(targetDate || '');
+                    }
+                }
+            }, [isOpen, initialData, targetDate]);
+
+            // Handle background click
+            const handleOverlayClick = (e) => {
+                if (e.target.id === 'modal-overlay') onClose();
+            };
+
+            const handleSave = () => {
+                if (!title.trim()) {
+                    alert('제목을 입력해주세요.');
+                    return;
+                }
+                const dataToSave = { title, content, link };
+                if (isCalendar) {
+                    dataToSave.date = startDate;
+                    dataToSave.endDate = endDate;
+                    dataToSave.type = 'event';
+                }
+                onSave(dataToSave, initialData?.id);
+                onClose();
+            };
+
+            return (
+                <div
+                    id="modal-overlay"
+                    onClick={handleOverlayClick}
+                    className={`fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center modal-overlay ${isOpen ? 'open pointer-events-auto' : 'pointer-events-none'}`}
+                >
+                    <div className={`w-[700px] h-[80vh] glass-modal rounded-xl flex flex-col modal-content ${isOpen ? 'open' : ''}`}>
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+                            <div className="flex items-center text-sm text-gray-500 font-medium">
+                                <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs mr-2">{activeBoardName}</span>
+                                {initialData ? '문서 수정' : '새 문서 작성'}
+                            </div>
+                            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md text-gray-400 hover:text-gray-600 transition-colors">
+                                <Icon name="x" className="w-5 h-5 stroke-[2]" />
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="flex-1 overflow-y-auto p-12 flex flex-col">
+                            <input
+                                type="text"
+                                placeholder="제목 없음"
+                                value={title}
+                                onChange={e => setTitle(e.target.value)}
+                                className="w-full text-4xl font-bold bg-transparent border-none outline-none placeholder:text-gray-200 mb-8"
+                            />
+
+                            {/* Date Input Row (Only for Calendar events) */}
+                            {isCalendar && (
+                                <div className="flex items-center gap-4 mb-4 bg-gray-50/50 p-3 rounded-lg border border-gray-100/50">
+                                    <div className="flex items-center text-gray-400 min-w-fit">
+                                        <Icon name="calendar" className="w-4 h-4 mr-2" />
+                                        <span className="text-[13px] font-semibold">일정 기간</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-1">
+                                        <input
+                                            type="date"
+                                            value={startDate}
+                                            onChange={e => {
+                                                setStartDate(e.target.value);
+                                                if (endDate && e.target.value > endDate) setEndDate(e.target.value);
+                                            }}
+                                            className="bg-white border border-gray-200 focus:border-blue-500 rounded px-3 py-1.5 outline-none text-[13px] text-gray-700 min-w-[130px]"
+                                        />
+                                        <span className="text-gray-400 text-sm font-bold">~</span>
+                                        <input
+                                            type="date"
+                                            value={endDate}
+                                            onChange={e => setEndDate(e.target.value)}
+                                            min={startDate}
+                                            className="bg-white border border-gray-200 focus:border-blue-500 rounded px-3 py-1.5 outline-none text-[13px] text-gray-700 min-w-[130px]"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Link Input Row */}
+                            <div className="flex items-center gap-4 mb-8 bg-gray-50/50 p-3 rounded-lg border border-gray-100/50">
+                                <div className="flex items-center text-gray-400 min-w-fit">
+                                    <Icon name="link" className="w-4 h-4 mr-2" />
+                                    <span className="text-[13px] font-semibold">참고 링크</span>
+                                </div>
+                                <input
+                                    type="text"
+                                    placeholder="https://..."
+                                    value={link}
+                                    onChange={e => setLink(e.target.value)}
+                                    className="flex-1 bg-white border-none outline-none text-[14px] text-blue-600 placeholder:text-gray-300 py-1"
+                                />
+                            </div>
+
+                            <textarea
+                                placeholder="자유롭게 내용을 입력하세요..."
+                                value={content}
+                                onChange={e => setContent(e.target.value)}
+                                className="w-full flex-1 resize-none bg-transparent border-none outline-none placeholder:text-gray-200 text-[16px] leading-relaxed"
+                            ></textarea>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0 bg-gray-50/30">
+                            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md transition-colors font-medium">
+                                취소
+                            </button>
+                            <button onClick={handleSave} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors shadow-sm font-semibold">
+                                {initialData ? '수정 완료' : '페이지 등록'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 2-1. Post Detail Modal Component
+        const PostDetail = ({ isOpen, onClose, post, comments, onAddComment, onEditComment, onDeleteComment, onEditPost, onDeletePost }) => {
+            const [commentInput, setCommentInput] = React.useState('');
+            const [editingCommentId, setEditingCommentId] = React.useState(null);
+            const [editCommentText, setEditCommentText] = React.useState('');
+
+            if (!post) return null;
+
+            // Handle background click
+            const handleOverlayClick = (e) => {
+                if (e.target.id === 'detail-overlay') onClose();
+            };
+
+            const handleCommentSubmit = (e) => {
+                if (e.key === 'Enter' && commentInput.trim()) {
+                    onAddComment(post.id, commentInput);
+                    setCommentInput('');
+                }
+            };
+
+            const handleEditStart = (comment) => {
+                setEditingCommentId(comment.id);
+                setEditCommentText(comment.text);
+            };
+
+            const handleEditSave = (commentId) => {
+                if (editCommentText.trim()) {
+                    onEditComment(post.id, commentId, editCommentText.trim());
+                }
+                setEditingCommentId(null);
+            };
+
+            const handleEditKeyDown = (e, commentId) => {
+                if (e.key === 'Enter') handleEditSave(commentId);
+                if (e.key === 'Escape') setEditingCommentId(null);
+            };
+
+            return (
+                <div
+                    id="detail-overlay"
+                    onClick={handleOverlayClick}
+                    className={`fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center modal-overlay ${isOpen ? 'open pointer-events-auto' : 'pointer-events-none'}`}
+                >
+                    <div className={`w-[800px] h-[90vh] glass-modal rounded-xl flex flex-col modal-content ${isOpen ? 'open' : ''}`}>
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100 flex-shrink-0">
+                            <div className="flex items-center text-sm text-gray-400">
+                                <Icon name="file-text" className="w-4 h-4 mr-2" />
+                                <span className="hover:underline cursor-pointer">상세 보기</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => onEditPost(post)} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+                                    <Icon name="pencil" className="w-4 h-4 mr-1.5" />
+                                    수정
+                                </button>
+                                <button onClick={() => { if (window.confirm('정말 삭제하시겠습니까?')) onDeletePost(post.id); }} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
+                                    <Icon name="trash-2" className="w-4 h-4 mr-1.5" />
+                                    삭제
+                                </button>
+                                <div className="w-px h-4 bg-gray-200 mx-1"></div>
+                                <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md text-gray-400 hover:text-gray-600 transition-colors">
+                                    <Icon name="x" className="w-5 h-5 stroke-[2]" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="flex-1 overflow-y-auto">
+                            <div className="p-16 pb-12">
+                                <h1 className="text-4xl font-bold text-gray-900 mb-6">{post.title}</h1>
+                                <div className="flex items-center text-sm text-gray-400 mb-10 pb-6 border-b border-gray-50">
+                                    <div className="flex items-center mr-6">
+                                        <div className="w-6 h-6 rounded-full bg-gray-200 mr-2 flex items-center justify-center text-[10px] text-gray-600 font-bold">나</div>
+                                        <span>작성자: {post.author}</span>
+                                    </div>
+                                    <div className="flex items-center">
+                                        <Icon name="clock" className="w-3.5 h-3.5 mr-1.5" />
+                                        <span>작성일: {post.date}</span>
+                                    </div>
+                                </div>
+
+                                {post.link && (
+                                    <div className="mb-10">
+                                        <a
+                                            href={post.link.startsWith('http') ? post.link : `https://${post.link}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium border border-blue-100"
+                                        >
+                                            <Icon name="link" className="w-4 h-4 mr-2" />
+                                            참고 링크 바로가기
+                                        </a>
+                                    </div>
+                                )}
+
+                                <div className="text-[17px] leading-[1.8] text-gray-700 whitespace-pre-wrap min-h-[200px]">
+                                    {post.content || <span className="text-gray-300 italic">내용이 없습니다.</span>}
+                                </div>
+                            </div>
+
+                            {/* Comment Section */}
+                            <div className="bg-gray-50/50 p-16 pt-10 pb-20 border-t border-gray-100">
+                                <div className="flex items-center mb-6">
+                                    <Icon name="message-square" className="w-5 h-5 mr-2 text-gray-400" />
+                                    <h3 className="font-bold text-gray-700">댓글 ({comments.length})</h3>
+                                </div>
+
+                                <div className="mb-8 relative">
+                                    <input
+                                        type="text"
+                                        placeholder="댓글을 입력하고 Enter를 누르세요..."
+                                        className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all text-sm shadow-sm"
+                                        value={commentInput}
+                                        onChange={e => setCommentInput(e.target.value)}
+                                        onKeyDown={handleCommentSubmit}
+                                    />
+                                    <button
+                                        onClick={() => { if (commentInput.trim()) { onAddComment(post.id, commentInput); setCommentInput(''); } }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                                    >
+                                        <Icon name="arrow-up" className="w-4 h-4 stroke-[3]" />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-6">
+                                    {comments.length === 0 ? (
+                                        <p className="text-center py-10 text-gray-400 text-sm">첫 댓글을 남겨보세요.</p>
+                                    ) : (
+                                        comments.map((comment) => (
+                                            <div key={comment.id} className="flex gap-4 group/comment">
+                                                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold flex-shrink-0 ring-4 ring-white shadow-sm">
+                                                    {comment.author[0]}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-sm font-bold text-gray-800">{comment.author}</span>
+                                                            <span className="text-[11px] text-gray-400">{comment.time}</span>
+                                                        </div>
+                                                        {comment.author === '나' && editingCommentId !== comment.id && (
+                                                            <div className="flex items-center gap-2 opacity-0 group-hover/comment:opacity-100 transition-opacity">
+                                                                <button
+                                                                    onClick={() => handleEditStart(comment)}
+                                                                    className="text-[11px] text-gray-400 hover:text-blue-600 font-medium"
+                                                                >수정</button>
+                                                                <button
+                                                                    onClick={() => { if (confirm('댓글을 삭제하시겠습니까?')) onDeleteComment(post.id, comment.id); }}
+                                                                    className="text-[11px] text-gray-400 hover:text-red-600 font-medium"
+                                                                >삭제</button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {editingCommentId === comment.id ? (
+                                                        <div className="relative">
+                                                            <input
+                                                                autoFocus
+                                                                type="text"
+                                                                value={editCommentText}
+                                                                onChange={(e) => setEditCommentText(e.target.value)}
+                                                                onBlur={() => handleEditSave(comment.id)}
+                                                                onKeyDown={(e) => handleEditKeyDown(e, comment.id)}
+                                                                className="w-full text-sm text-gray-600 bg-white p-3 rounded-lg border-2 border-blue-500 shadow-lg outline-none"
+                                                            />
+                                                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-blue-500 font-bold">
+                                                                Enter로 저장
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-sm text-gray-600 leading-relaxed bg-white p-3 rounded-lg rounded-tl-none border border-gray-100 shadow-sm">{comment.text}</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 2-2. Calendar Component
+        const Calendar = ({ posts, onDateClick, onEventClick, onSyncTeams }) => {
+            const [viewDate, setViewDate] = React.useState(new Date());
+
+            const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+            const firstDayOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
+
+            const monthNames = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"];
+
+            const prevMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
+            const nextMonth = () => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
+
+            const calendarDays = [];
+            for (let i = 0; i < firstDayOfMonth; i++) calendarDays.push(null);
+            for (let i = 1; i <= daysInMonth; i++) calendarDays.push(i);
+
+            const getEventsForDay = (day) => {
+                if (!day) return [];
+                const currentDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), day);
+                currentDate.setHours(0, 0, 0, 0);
+
+                return posts.filter(p => {
+                    if (!p.date) return false;
+                    const startDate = new Date(p.date);
+                    startDate.setHours(0, 0, 0, 0);
+                    const endDate = p.endDate ? new Date(p.endDate) : startDate;
+                    endDate.setHours(0, 0, 0, 0);
+
+                    return currentDate >= startDate && currentDate <= endDate;
+                });
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                    {/* Calendar Header */}
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50 bg-gray-50/30">
+                        <div className="flex items-center gap-4">
+                            <h3 className="text-xl font-bold text-gray-800">
+                                {viewDate.getFullYear()}년 {monthNames[viewDate.getMonth()]}
+                            </h3>
+                            <div className="flex gap-1">
+                                <button onClick={prevMonth} className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-gray-500">
+                                    <Icon name="chevron-left" className="w-4 h-4" />
+                                </button>
+                                <button onClick={nextMonth} className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-gray-500">
+                                    <Icon name="chevron-right" className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                        <button
+                            onClick={onSyncTeams}
+                            className="flex items-center px-4 py-2 bg-[#464EB8] text-white text-sm font-semibold rounded-lg hover:bg-[#3b429f] transition-all shadow-sm active:scale-95"
+                        >
+                            <Icon name="refresh-cw" className="w-4 h-4 mr-2" />
+                            TEAMS 일정 불러오기
+                        </button>
+                    </div>
+
+                    {/* Weekdays */}
+                    <div className="grid grid-cols-7 border-b border-gray-50">
+                        {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
+                            <div key={d} className={`py-3 text-center text-xs font-bold uppercase tracking-wider ${i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-gray-400'}`}>
+                                {d}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Days Grid */}
+                    <div className="flex-1 grid grid-cols-7 auto-rows-fr overflow-y-auto">
+                        {calendarDays.map((day, idx) => {
+                            const events = getEventsForDay(day);
+                            const isToday = day && new Date().getDate() === day && new Date().getMonth() === viewDate.getMonth() && new Date().getFullYear() === viewDate.getFullYear();
+
+                            return (
+                                <div
+                                    key={idx}
+                                    onClick={() => day && onDateClick(day, viewDate)}
+                                    className={`min-h-[120px] p-2 border-r border-b border-gray-50 transition-colors ${day ? 'hover:bg-gray-50/50 cursor-pointer' : 'bg-gray-50/20'}`}
+                                >
+                                    {day && (
+                                        <>
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className={`text-sm font-semibold w-7 h-7 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white shadow-md' : idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-600'}`}>
+                                                    {day}
+                                                </span>
+                                            </div>
+                                            <div className="space-y-1">
+                                                {events.map((ev, i) => (
+                                                    <div
+                                                        key={ev.id}
+                                                        onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
+                                                        className={`text-[11px] p-1.5 rounded-md truncate border shadow-sm transition-transform hover:scale-[1.02] cursor-pointer ${ev.title.includes('회식') ? 'bg-orange-50 text-orange-700 border-orange-100' :
+                                                            ev.title.includes('회의') ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                                                                'bg-gray-50 text-gray-700 border-gray-100'
+                                                            }`}
+                                                        title={ev.title}
+                                                    >
+                                                        {ev.title}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        // 2-3. Notification Settings Modal
+        const NotificationSettingsModal = ({ isOpen, onClose, settings, onSave }) => {
+            const [localSettings, setLocalSettings] = React.useState(settings);
+
+            React.useEffect(() => {
+                if (isOpen) setLocalSettings(settings);
+            }, [isOpen, settings]);
+
+            const handleToggle = (key) => {
+                setLocalSettings(prev => ({ ...prev, [key]: !prev[key] }));
+            };
+
+            const handleSave = () => {
+                onSave(localSettings);
+                onClose();
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+                    <div className="w-[480px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-scale-up">
+                        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                            <h3 className="font-bold text-gray-800 flex items-center">
+                                <Icon name="bell" className="w-5 h-5 mr-2 text-blue-600" />
+                                알림 및 연동 설정
+                            </h3>
+                            <button onClick={onClose} className="p-1.5 hover:bg-gray-200 rounded-full transition-colors text-gray-400">
+                                <Icon name="x" className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-8 space-y-8">
+                            {/* Teams Section */}
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                        <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center mr-4">
+                                            <Icon name="messages-square" className="w-6 h-6 text-blue-600" />
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-gray-800">Microsoft Teams 알림</p>
+                                            <p className="text-xs text-gray-400">댓글 발생 시 Teams로 즉시 알림</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => handleToggle('teamsEnabled')}
+                                        className={`w-12 h-6 rounded-full transition-colors relative ${localSettings.teamsEnabled ? 'bg-blue-600' : 'bg-gray-200'}`}
+                                    >
+                                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.teamsEnabled ? 'left-7' : 'left-1'}`} />
+                                    </button>
+                                </div>
+                                {localSettings.teamsEnabled && (
+                                    <div className="pl-14">
+                                        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">Teams Webhook URL (Enterprise)</p>
+                                        <input
+                                            type="text"
+                                            placeholder="https://outlook.office.com/webhook/..."
+                                            value={localSettings.teamsWebhookUrl || ''}
+                                            onChange={(e) => setLocalSettings(prev => ({ ...prev, teamsWebhookUrl: e.target.value }))}
+                                            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-4 bg-gray-50 flex justify-end gap-2">
+                            <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">취소</button>
+                            <button onClick={handleSave} className="px-6 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all">내역 저장</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 2-4. Toast Component
+        const Toast = ({ message, type, onClose }) => {
+            React.useEffect(() => {
+                const timer = setTimeout(onClose, 3000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            return (
+                <div className={`fixed top-6 right-6 z-[100] flex items-center p-4 rounded-xl shadow-2xl animate-slide-in-right ${type === 'success' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
+                    }`}>
+                    <Icon name={type === 'success' ? 'check-circle' : 'info'} className="w-5 h-5 mr-3" />
+                    <span className="text-sm font-bold">{message}</span>
+                </div>
+            );
+        };
+
+        // 2-5. User Registration Modal
+        const UserRegistrationModal = ({ isOpen, onClose, userInfo, onSave }) => {
+            const [name, setName] = React.useState(userInfo?.name || '');
+            const [position, setPosition] = React.useState(userInfo?.position || '');
+
+            React.useEffect(() => {
+                if (isOpen) {
+                    setName(userInfo?.name || '');
+                    setPosition(userInfo?.position || '');
+                }
+            }, [isOpen, userInfo]);
+
+            const handleSave = () => {
+                if (!name.trim() || !position.trim()) {
+                    alert('성명과 직위를 모두 입력해주세요.');
+                    return;
+                }
+                onSave({ name: name.trim(), position: position.trim() });
+                onClose();
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+                    <div className="w-[400px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-scale-up border border-blue-100">
+                        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-blue-50/30">
+                            <h3 className="font-bold text-gray-800 flex items-center">
+                                <Icon name="user-plus" className="w-5 h-5 mr-2 text-blue-600" />
+                                정보 등록 (Identity)
+                            </h3>
+                            <button onClick={onClose} className="p-1.5 hover:bg-gray-200 rounded-full transition-colors text-gray-400">
+                                <Icon name="x" className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-8 space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">성명</label>
+                                <input
+                                    type="text"
+                                    placeholder="예: 홍길동"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">직위</label>
+                                <input
+                                    type="text"
+                                    placeholder="예: 과장"
+                                    value={position}
+                                    onChange={(e) => setPosition(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
+                                />
+                            </div>
+                            <p className="text-[12px] text-gray-400 leading-relaxed bg-gray-50 p-3 rounded-lg border border-dashed border-gray-200">
+                                <Icon name="shield-check" className="w-3.5 h-3.5 inline mr-1 text-blue-400" />
+                                등록된 정보는 게시물 및 댓글 작성 시 실명으로 표시됩니다.
+                            </p>
+                        </div>
+
+                        <div className="px-6 py-4 bg-gray-50 flex justify-end gap-2">
+                            <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">취소</button>
+                            <button onClick={handleSave} className="px-6 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all">등록 완료</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 3. Main Content Component
+        const BoardContent = ({ board, posts, onOpenEditor, onPostClick, onEventClick, onSyncTeams }) => {
+            const isCalendar = board.id === 'board2';
+
+            return (
+                <div className="flex-1 flex flex-col min-w-0 bg-[#fbfbfa]">
+                    {/* Header */}
+                    <header className="h-[72px] flex items-center justify-between px-8 border-b border-gray-100 bg-white/80 backdrop-blur-md sticky top-0 z-10 flex-shrink-0 shadow-sm">
+                        <div className="flex items-center">
+                            <Icon name={board.icon} className="w-6 h-6 mr-3 text-gray-500" />
+                            <h2 className="text-xl font-extrabold tracking-tight text-gray-800">{board.name}</h2>
+                        </div>
+                    </header>
+
+                    {/* Content Area */}
+                    <main className="flex-1 overflow-y-auto p-8 relative">
+                        {isCalendar ? (
+                            <Calendar
+                                posts={posts}
+                                onDateClick={(day, viewDate) => {
+                                    const dateStr = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                                    onOpenEditor(dateStr);
+                                }}
+                                onEventClick={onEventClick}
+                                onSyncTeams={onSyncTeams}
+                            />
+                        ) : (
+                            <div className="mb-12 flex items-end justify-between border-b-2 border-gray-100 pb-6 bg-white/50 p-8 rounded-2xl shadow-sm">
+                                <div>
+                                    <h2 className="text-[42px] font-extrabold mb-2 tracking-tight text-gray-900">{board.name}</h2>
+                                    <p className="text-gray-400 text-lg">공정관리팀을 위한 소통 공간입니다.</p>
+                                </div>
+                                <button
+                                    onClick={() => onOpenEditor()}
+                                    className="flex items-center px-5 py-2.5 bg-blue-600 text-white text-[15px] font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-95 mb-2"
+                                >
+                                    <Icon name="plus" className="w-5 h-5 mr-2 stroke-[3]" />
+                                    게시물 작성
+                                </button>
+                            </div>
+                        )}
+
+                        {!isCalendar && (
+                            posts.length === 0 ? (
+                                <div className="text-center py-40 text-gray-400 bg-white rounded-3xl border-2 border-dashed border-gray-100 shadow-sm">
+                                    <Icon name="file-plus" className="w-16 h-16 mx-auto mb-6 opacity-20 stroke-[1]" />
+                                    <p className="text-xl font-semibold">등록된 문서가 없습니다.</p>
+                                    <p className="text-sm mt-2">첫 번째 소식을 팀원들과 나눠보세요.</p>
+                                </div>
+                            ) : (
+                                <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                                    <div className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] py-4 px-8 border-b border-gray-50 flex justify-between bg-gray-50/30">
+                                        <span>제목</span>
+                                        <span>날짜 / 작성자</span>
+                                    </div>
+                                    <div className="divide-y divide-gray-50">
+                                        {posts.map((post, index) => (
+                                            <div
+                                                key={post.id}
+                                                onClick={() => onPostClick(post)}
+                                                className="animate-fade-in group flex items-center justify-between py-5 px-8 hover:bg-blue-50/30 cursor-pointer transition-all"
+                                                style={{ animationDelay: `${index * 0.05}s` }}
+                                            >
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm">
+                                                        <Icon name="file-text" className="w-5 h-5" />
+                                                    </div>
+                                                    <h3 className="text-[17px] font-bold text-gray-700 group-hover:text-blue-600 transition-colors">{post.title}</h3>
+                                                </div>
+                                                <div className="flex items-center gap-6">
+                                                    <div className="text-right">
+                                                        <p className="text-[14px] text-gray-600 font-semibold">{post.date}</p>
+                                                        <p className="text-[12px] text-gray-400">{post.author}</p>
+                                                    </div>
+                                                    <Icon name="chevron-right" className="w-5 h-5 text-gray-200 group-hover:text-blue-400 transition-all transform group-hover:translate-x-1" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        // 4. Main App Container
+        const App = () => {
+            // 1. Hooks (Must be at the top)
+            const [boards, setBoards] = React.useState(() => {
+                try {
+                    const saved = localStorage.getItem('ws_boards');
+                    return saved ? JSON.parse(saved) : BOARDS;
+                } catch (e) { return BOARDS; }
+            });
+            const [activeBoard, setActiveBoard] = React.useState(boards[0]?.id || 'board1');
+            const [posts, setPosts] = React.useState(() => {
+                try {
+                    const saved = localStorage.getItem('ws_posts');
+                    return saved ? JSON.parse(saved) : initialPosts;
+                } catch (e) { return initialPosts; }
+            });
+            const [comments, setComments] = React.useState(() => {
+                try {
+                    const saved = localStorage.getItem('ws_comments');
+                    return saved ? JSON.parse(saved) : {};
+                } catch (e) { return {}; }
+            });
+
+            const [isEditorOpen, setIsEditorOpen] = React.useState(false);
+            const [selectedPost, setSelectedPost] = React.useState(null);
+            const [editingPost, setEditingPost] = React.useState(null);
+            const [targetDate, setTargetDate] = React.useState(null);
+
+            // User Identity State
+            const [userInfo, setUserInfo] = React.useState(() => {
+                try {
+                    const saved = localStorage.getItem('ws_user_info');
+                    return saved ? JSON.parse(saved) : null;
+                } catch (e) { return null; }
+            });
+            const [isUserModalOpen, setIsUserModalOpen] = React.useState(false);
+
+            // Visitor List State
+            const [visitorList, setVisitorList] = React.useState([
+                { name: '이민수', position: '부장' },
+                { name: '김지은', position: '대리' },
+                { name: '박하늘', position: '사원' }
+            ]);
+
+            React.useEffect(() => {
+                const interval = setInterval(() => {
+
+                    // Update visitor list
+                    setVisitorList(prev => {
+                        const newVisitorList = [...prev];
+                        const randomChange = Math.random();
+                        if (randomChange < 0.3 && newVisitorList.length > 1) { // Remove a visitor
+                            newVisitorList.splice(Math.floor(Math.random() * newVisitorList.length), 1);
+                        } else if (randomChange > 0.7 && newVisitorList.length < 5) { // Add a visitor
+                            const newName = ['최영희', '정수민', '강준호', '윤서연'][Math.floor(Math.random() * 4)];
+                            const newPosition = ['사원', '주임', '대리', '과장'][Math.floor(Math.random() * 4)];
+                            newVisitorList.push({ name: newName, position: newPosition });
+                        }
+                        return newVisitorList;
+                    });
+                }, 5000);
+                return () => clearInterval(interval);
+            }, []);
+
+            // Notification State
+            const [notificationSettings, setNotificationSettings] = React.useState(() => {
+                try {
+                    const saved = localStorage.getItem('ws_notifications');
+                    return saved ? JSON.parse(saved) : {
+                        teamsEnabled: false,
+                        teamsWebhookUrl: ''
+                    };
+                } catch (e) { return { teamsEnabled: false }; }
+            });
+            const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
+            const [toasts, setToasts] = React.useState([]);
+
+            const addToast = (message, type = 'info') => {
+                const id = Date.now();
+                setToasts(prev => [...prev, { id, message, type }]);
+            };
+
+            // Global event listener for settings
+            React.useEffect(() => {
+                const handleOpenSettings = () => setIsSettingsOpen(true);
+                const handleOpenUser = () => setIsUserModalOpen(true);
+                window.addEventListener('open-notification-settings', handleOpenSettings);
+                window.addEventListener('open-user-registration', handleOpenUser);
+                return () => {
+                    window.removeEventListener('open-notification-settings', handleOpenSettings);
+                    window.removeEventListener('open-user-registration', handleOpenUser);
+                };
+            }, []);
+
+            // Sync with localStorage
+            React.useEffect(() => {
+                localStorage.setItem('ws_boards', JSON.stringify(boards));
+            }, [boards]);
+
+            React.useEffect(() => {
+                localStorage.setItem('ws_posts', JSON.stringify(posts));
+            }, [posts]);
+
+            React.useEffect(() => {
+                localStorage.setItem('ws_comments', JSON.stringify(comments));
+            }, [comments]);
+
+            React.useEffect(() => {
+                localStorage.setItem('ws_notifications', JSON.stringify(notificationSettings));
+            }, [notificationSettings]);
+
+            React.useEffect(() => {
+                if (userInfo) localStorage.setItem('ws_user_info', JSON.stringify(userInfo));
+            }, [userInfo]);
+
+            const currentBoard = boards.find(b => b.id === activeBoard) || boards[0];
+            const currentPosts = posts[activeBoard] || [];
+
+            const handleRenameBoard = (boardId, newName) => {
+                setBoards(prev => prev.map(b => b.id === boardId ? { ...b, name: newName } : b));
+            };
+
+            const handleSavePost = (postData, editId) => {
+                const now = new Date();
+                const defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+                const authorDisplay = userInfo ? `${userInfo.name} ${userInfo.position}` : '작성자 미등록';
+                const finalDate = postData.date || defaultDate;
+
+                if (editId) {
+                    setPosts(prev => {
+                        const boardPosts = prev[activeBoard] || [];
+                        return {
+                            ...prev,
+                            [activeBoard]: boardPosts.map(p => p.id === editId ? { ...p, ...postData, date: finalDate } : p)
+                        };
+                    });
+                    if (selectedPost && selectedPost.id === editId) {
+                        setSelectedPost(prev => prev ? { ...prev, ...postData, date: finalDate } : null);
+                    }
+                } else {
+                    const newPost = {
+                        id: Date.now(),
+                        ...postData,
+                        date: finalDate,
+                        author: authorDisplay
+                    };
+                    setPosts(prev => ({
+                        ...prev,
+                        [activeBoard]: [newPost, ...(prev[activeBoard] || [])]
+                    }));
+                }
+                setEditingPost(null);
+            };
+
+            const handleDeletePost = (postId) => {
+                setPosts(prev => ({
+                    ...prev,
+                    [activeBoard]: prev[activeBoard].filter(p => p.id !== postId)
+                }));
+                setSelectedPost(null);
+            };
+
+            const handleEditPostRequest = (post) => {
+                setEditingPost(post);
+                setIsEditorOpen(true);
+            };
+
+            const handleEditorClose = () => {
+                setIsEditorOpen(false);
+                setEditingPost(null);
+            };
+
+            const handleSyncTeams = () => {
+                if (confirm('Microsoft Teams의 공정관리팀 일정을 불러오시겠습니까?')) {
+                    const teamsEvents = [
+                        { id: Date.now() + 1, title: '[Teams] 월간 성과 보고 회의', content: 'Teams 온라인 회의', date: '2026-02-25', author: 'Teams', type: 'event' },
+                        { id: Date.now() + 2, title: '[Teams] 외주사 현장 점검 공유', content: '서울 현장', date: '2026-02-18', author: 'Teams', type: 'event' }
+                    ];
+
+                    setPosts(prev => ({
+                        ...prev,
+                        board2: [...(prev.board2 || []), ...teamsEvents]
+                    }));
+                    alert('Teams 일정이 성공적으로 동기화되었습니다.');
+                }
+            };
+
+            const handleAddComment = (postId, text) => {
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                const authorDisplay = userInfo ? `${userInfo.name} ${userInfo.position}` : '나';
+
+                const newComment = {
+                    id: Date.now(),
+                    author: authorDisplay,
+                    text: text,
+                    time: timeStr
+                };
+
+                setComments(prev => ({
+                    ...prev,
+                    [postId]: [...(prev[postId] || []), newComment]
+                }));
+
+                // Handle Notification Logic
+                const post = Object.values(posts).flat().find(p => p.id === postId);
+                const isAuthorSelf = userInfo ? (post && post.author.includes(userInfo.name)) : (post && post.author === '나');
+
+                if (post && !isAuthorSelf) {
+                    if (notificationSettings.teamsEnabled) {
+                        // Simulate Teams Webhook call
+                        console.log('Sending Teams Notification via Webhook:', notificationSettings.teamsWebhookUrl);
+                        addToast(`TEAMS 알림: "${post.title}" 글에 새로운 댓글이 달렸습니다.`, 'success');
+                    }
+                }
+            };
+
+            const handleEditComment = (postId, commentId, newText) => {
+                setComments(prev => ({
+                    ...prev,
+                    [postId]: prev[postId].map(c => c.id === commentId ? { ...c, text: newText } : c)
+                }));
+            };
+
+            const handleDeleteComment = (postId, commentId) => {
+                setComments(prev => ({
+                    ...prev,
+                    [postId]: prev[postId].filter(c => c.id !== commentId)
+                }));
+            };
+
+            return (
+                <div className="flex h-screen w-full overflow-hidden bg-white text-[#37352f] antialiased">
+                    <Sidebar
+                        boards={boards}
+                        activeBoard={activeBoard}
+                        setActiveBoard={setActiveBoard}
+                        onRenameBoard={handleRenameBoard}
+                        userInfo={userInfo}
+                        visitorList={visitorList}
+                    />
+                    <BoardContent
+                        board={currentBoard}
+                        posts={currentPosts}
+                        onOpenEditor={(date) => {
+                            setTargetDate(date || null);
+                            setSelectedPost(null);
+                            setEditingPost(null);
+                            setIsEditorOpen(true);
+                        }}
+                        onPostClick={(post) => setSelectedPost(post)}
+                        onEventClick={(post) => {
+                            setTargetDate(post.date || null);
+                            setEditingPost(post);
+                            setIsEditorOpen(true);
+                        }}
+                        onSyncTeams={handleSyncTeams}
+                    />
+                    <PostEditor
+                        isOpen={isEditorOpen}
+                        onClose={() => { handleEditorClose(); setTargetDate(null); }}
+                        onSave={(data, id) => handleSavePost(data, id)}
+                        activeBoardName={currentBoard.name}
+                        initialData={editingPost}
+                        targetDate={targetDate}
+                        isCalendar={currentBoard.id === 'board2'}
+                    />
+                    <PostDetail
+                        isOpen={!!selectedPost}
+                        onClose={() => setSelectedPost(null)}
+                        post={selectedPost}
+                        comments={selectedPost ? (comments[selectedPost.id] || []) : []}
+                        onAddComment={handleAddComment}
+                        onEditComment={handleEditComment}
+                        onDeleteComment={handleDeleteComment}
+                        onEditPost={(post) => {
+                            setSelectedPost(null);
+                            setEditingPost(post);
+                            setIsEditorOpen(true);
+                        }}
+                        onDeletePost={handleDeletePost}
+                    />
+
+                    {/* User Registration Modal */}
+                    <UserRegistrationModal
+                        isOpen={isUserModalOpen}
+                        onClose={() => setIsUserModalOpen(false)}
+                        userInfo={userInfo}
+                        onSave={(info) => {
+                            setUserInfo(info);
+                            addToast(`${info.name} ${info.position}님, 반갑습니다!`, 'success');
+                        }}
+                    />
+
+                    {/* Notification Settings Modal */}
+                    <NotificationSettingsModal
+                        isOpen={isSettingsOpen}
+                        onClose={() => setIsSettingsOpen(false)}
+                        settings={notificationSettings}
+                        onSave={(newSettings) => {
+                            setNotificationSettings(newSettings);
+                            addToast('알림 설정이 저장되었습니다.', 'success');
+                        }}
+                    />
+
+                    {/* Toast Overlay */}
+                    <div className="toast-container">
+                        {toasts.map(toast => (
+                            <Toast
+                                key={toast.id}
+                                message={toast.message}
+                                type={toast.type}
+                                onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                            />
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+
+    </script>
+</body>
+
+</html>
