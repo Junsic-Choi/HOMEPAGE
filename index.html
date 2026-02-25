@@ -1101,31 +1101,34 @@
 
             // Handle Presence (Online Status)
             React.useEffect(() => {
-                if (userInfo?.name) {
-                    const presenceRef = database.ref('presence').push();
+                const connectedRef = database.ref('.info/connected');
 
-                    // On connect/disconnect
-                    const connectedRef = database.ref('.info/connected');
-                    connectedRef.on('value', (snap) => {
-                        if (snap.val() === true) {
-                            presenceRef.onDisconnect().remove();
-                            presenceRef.set({
-                                name: userInfo.name,
-                                position: userInfo.position,
-                                timestamp: firebase.database.ServerValue.TIMESTAMP
-                            });
-                            setMyPresenceRef(presenceRef);
-                        }
-                    });
+                connectedRef.on('value', (snap) => {
+                    if (snap.val() === true && userInfo?.name) {
+                        const presenceRef = database.ref('presence').push();
+                        presenceRef.onDisconnect().remove();
+                        presenceRef.set({
+                            name: userInfo.name,
+                            position: userInfo.position,
+                            timestamp: firebase.database.ServerValue.TIMESTAMP
+                        });
+                        setMyPresenceRef(presenceRef);
+                    }
+                });
 
-                    return () => {
-                        connectedRef.off();
-                        if (presenceRef) {
-                            presenceRef.remove();
-                        }
-                    };
-                }
+                return () => {
+                    connectedRef.off();
+                };
             }, [userInfo]);
+
+            // Cleanup presence on unmount explicitly just in case
+            React.useEffect(() => {
+                return () => {
+                    if (myPresenceRef) {
+                        myPresenceRef.remove();
+                    }
+                };
+            }, [myPresenceRef]);
 
             // Notification State
             const [notificationSettings, setNotificationSettings] = React.useState(() => {
