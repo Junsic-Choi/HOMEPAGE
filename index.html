@@ -13,6 +13,10 @@
     <!-- Babel (In-browser JSX compilation) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- Firebase SDKs (Compat version for easier CDN usage) -->
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-database-compat.js"></script>
+
     <!-- Tailwind CSS (CDN for styling) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -164,6 +168,19 @@
         // -------------------------------------------------------------
         // Data & State Management
         // -------------------------------------------------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyD-oNDB8sOPauL1skN5jZwDfSFTwxfWMnQ",
+            authDomain: "process-control-workspace.firebaseapp.com",
+            projectId: "process-control-workspace",
+            databaseURL: "https://process-control-workspace-default-rtdb.firebaseio.com",
+            storageBucket: "process-control-workspace.firebasestorage.app",
+            messagingSenderId: "577685320934",
+            appId: "1:577685320934:web:4fb3981bcb39aac2b7b727",
+            measurementId: "G-7NTPM9HMES"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
         const BOARDS = [
             { id: 'board1', name: '업무 공유', icon: 'zap' },
             { id: 'board2', name: '스케줄 캘린더', icon: 'calendar' },
@@ -1014,25 +1031,10 @@
         // 4. Main App Container
         const App = () => {
             // 1. Hooks (Must be at the top)
-            const [boards, setBoards] = React.useState(() => {
-                try {
-                    const saved = localStorage.getItem('ws_boards');
-                    return saved ? JSON.parse(saved) : BOARDS;
-                } catch (e) { return BOARDS; }
-            });
+            const [boards, setBoards] = React.useState(BOARDS);
             const [activeBoard, setActiveBoard] = React.useState(boards[0]?.id || 'board1');
-            const [posts, setPosts] = React.useState(() => {
-                try {
-                    const saved = localStorage.getItem('ws_posts');
-                    return saved ? JSON.parse(saved) : initialPosts;
-                } catch (e) { return initialPosts; }
-            });
-            const [comments, setComments] = React.useState(() => {
-                try {
-                    const saved = localStorage.getItem('ws_comments');
-                    return saved ? JSON.parse(saved) : {};
-                } catch (e) { return {}; }
-            });
+            const [posts, setPosts] = React.useState({ board1: [], board2: [], board3: [] });
+            const [comments, setComments] = React.useState({});
 
             const [isEditorOpen, setIsEditorOpen] = React.useState(false);
             const [selectedPost, setSelectedPost] = React.useState(null);
@@ -1048,18 +1050,82 @@
             });
             const [isUserModalOpen, setIsUserModalOpen] = React.useState(false);
 
-            // Visitor List State
+            // Visitor List State (Presence System)
             const [visitorList, setVisitorList] = React.useState([]);
+            const [myPresenceRef, setMyPresenceRef] = React.useState(null);
 
-            // Listen to storage events to simulate very basic cross-tab "real-time"
-            // For true cross-device sharing, a real-time database (e.g., Firebase, Supabase) is required.
+            // Firebase Real-time Subscriptions
             React.useEffect(() => {
-                const syncCrossTabInfo = () => {
-                    // Placeholder for future WebRTC or WebSocket logic
+                // Subscribe to Posts
+                const postsRef = database.ref('posts');
+                postsRef.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setPosts(data);
+                    } else {
+                        setPosts({ board1: [], board2: [], board3: [] });
+                    }
+                });
+
+                // Subscribe to Comments
+                const commentsRef = database.ref('comments');
+                commentsRef.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setComments(data);
+                    } else {
+                        setComments({});
+                    }
+                });
+
+                // Subscribe to Visitors (Presence)
+                const visitorsRef = database.ref('presence');
+                visitorsRef.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        const visitors = Object.values(data).filter(v =>
+                            v.name && v.name !== userInfo?.name // Filter out self and incomplete profiles
+                        );
+                        setVisitorList(visitors);
+                    } else {
+                        setVisitorList([]);
+                    }
+                });
+
+                return () => {
+                    postsRef.off();
+                    commentsRef.off();
+                    visitorsRef.off();
                 };
-                window.addEventListener('storage', syncCrossTabInfo);
-                return () => window.removeEventListener('storage', syncCrossTabInfo);
-            }, []);
+            }, [userInfo]);
+
+            // Handle Presence (Online Status)
+            React.useEffect(() => {
+                if (userInfo?.name) {
+                    const presenceRef = database.ref('presence').push();
+
+                    // On connect/disconnect
+                    const connectedRef = database.ref('.info/connected');
+                    connectedRef.on('value', (snap) => {
+                        if (snap.val() === true) {
+                            presenceRef.onDisconnect().remove();
+                            presenceRef.set({
+                                name: userInfo.name,
+                                position: userInfo.position,
+                                timestamp: firebase.database.ServerValue.TIMESTAMP
+                            });
+                            setMyPresenceRef(presenceRef);
+                        }
+                    });
+
+                    return () => {
+                        connectedRef.off();
+                        if (presenceRef) {
+                            presenceRef.remove();
+                        }
+                    };
+                }
+            }, [userInfo]);
 
             // Notification State
             const [notificationSettings, setNotificationSettings] = React.useState(() => {
@@ -1091,19 +1157,7 @@
                 };
             }, []);
 
-            // Sync with localStorage
-            React.useEffect(() => {
-                localStorage.setItem('ws_boards', JSON.stringify(boards));
-            }, [boards]);
-
-            React.useEffect(() => {
-                localStorage.setItem('ws_posts', JSON.stringify(posts));
-            }, [posts]);
-
-            React.useEffect(() => {
-                localStorage.setItem('ws_comments', JSON.stringify(comments));
-            }, [comments]);
-
+            // Sync with localStorage for settings and userInfo ONLY
             React.useEffect(() => {
                 localStorage.setItem('ws_notifications', JSON.stringify(notificationSettings));
             }, [notificationSettings]);
@@ -1126,37 +1180,45 @@
                 const authorDisplay = userInfo ? `${userInfo.name} ${userInfo.position}` : '작성자 미등록';
                 const finalDate = postData.date || defaultDate;
 
+                const boardPostsRef = database.ref(`posts/${activeBoard}`);
+
                 if (editId) {
-                    setPosts(prev => {
-                        const boardPosts = prev[activeBoard] || [];
-                        return {
-                            ...prev,
-                            [activeBoard]: boardPosts.map(p => p.id === editId ? { ...p, ...postData, date: finalDate } : p)
-                        };
+                    // Update existing post
+                    boardPostsRef.once('value').then(snapshot => {
+                        const boardPosts = snapshot.val() || [];
+                        const updatedPosts = boardPosts.map(p =>
+                            p.id === editId ? { ...p, ...postData, date: finalDate } : p
+                        );
+                        boardPostsRef.set(updatedPosts);
                     });
+
                     if (selectedPost && selectedPost.id === editId) {
                         setSelectedPost(prev => prev ? { ...prev, ...postData, date: finalDate } : null);
                     }
                 } else {
+                    // Create new post
                     const newPost = {
                         id: Date.now(),
                         ...postData,
                         date: finalDate,
                         author: authorDisplay
                     };
-                    setPosts(prev => ({
-                        ...prev,
-                        [activeBoard]: [newPost, ...(prev[activeBoard] || [])]
-                    }));
+
+                    boardPostsRef.once('value').then(snapshot => {
+                        const boardPosts = snapshot.val() || [];
+                        boardPostsRef.set([newPost, ...boardPosts]);
+                    });
                 }
                 setEditingPost(null);
             };
 
             const handleDeletePost = (postId) => {
-                setPosts(prev => ({
-                    ...prev,
-                    [activeBoard]: prev[activeBoard].filter(p => p.id !== postId)
-                }));
+                const boardPostsRef = database.ref(`posts/${activeBoard}`);
+                boardPostsRef.once('value').then(snapshot => {
+                    const boardPosts = snapshot.val() || [];
+                    const filteredPosts = boardPosts.filter(p => p.id !== postId);
+                    boardPostsRef.set(filteredPosts);
+                });
                 setSelectedPost(null);
             };
 
@@ -1177,10 +1239,11 @@
                         { id: Date.now() + 2, title: '[Teams] 외주사 현장 점검 공유', content: '서울 현장', date: '2026-02-18', author: 'Teams', type: 'event' }
                     ];
 
-                    setPosts(prev => ({
-                        ...prev,
-                        board2: [...(prev.board2 || []), ...teamsEvents]
-                    }));
+                    const board2Ref = database.ref('posts/board2');
+                    board2Ref.once('value').then(snapshot => {
+                        const currentEvents = snapshot.val() || [];
+                        board2Ref.set([...currentEvents, ...teamsEvents]);
+                    });
                     alert('Teams 일정이 성공적으로 동기화되었습니다.');
                 }
             };
@@ -1198,10 +1261,11 @@
                     time: timeStr
                 };
 
-                setComments(prev => ({
-                    ...prev,
-                    [postId]: [...(prev[postId] || []), newComment]
-                }));
+                const postCommentsRef = database.ref(`comments/${postId}`);
+                postCommentsRef.once('value').then(snapshot => {
+                    const currentComments = snapshot.val() || [];
+                    postCommentsRef.set([...currentComments, newComment]);
+                });
 
                 // Handle Notification Logic
                 const post = Object.values(posts).flat().find(p => p.id === postId);
@@ -1217,17 +1281,23 @@
             };
 
             const handleEditComment = (postId, commentId, newText) => {
-                setComments(prev => ({
-                    ...prev,
-                    [postId]: prev[postId].map(c => c.id === commentId ? { ...c, text: newText } : c)
-                }));
+                const postCommentsRef = database.ref(`comments/${postId}`);
+                postCommentsRef.once('value').then(snapshot => {
+                    const currentComments = snapshot.val() || [];
+                    const updatedComments = currentComments.map(c =>
+                        c.id === commentId ? { ...c, text: newText } : c
+                    );
+                    postCommentsRef.set(updatedComments);
+                });
             };
 
             const handleDeleteComment = (postId, commentId) => {
-                setComments(prev => ({
-                    ...prev,
-                    [postId]: prev[postId].filter(c => c.id !== commentId)
-                }));
+                const postCommentsRef = database.ref(`comments/${postId}`);
+                postCommentsRef.once('value').then(snapshot => {
+                    const currentComments = snapshot.val() || [];
+                    const filteredComments = currentComments.filter(c => c.id !== commentId);
+                    postCommentsRef.set(filteredComments);
+                });
             };
 
             return (
