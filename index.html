@@ -272,15 +272,24 @@
                                 접속 중인 사용자 명단
                             </div>
                             <div className="space-y-3">
-                                <div className="flex items-center group">
-                                    <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold mr-2 ring-2 ring-blue-100">
-                                        {userInfo?.name ? userInfo.name[0] : '나'}
+                                {userInfo ? (
+                                    <div className="flex items-center group">
+                                        <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold mr-2 ring-2 ring-blue-100">
+                                            {userInfo.name[0]}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-[12px] font-bold text-gray-800 truncate">{userInfo.name} <span className="font-normal text-gray-500 ml-1">{userInfo.position}</span></p>
+                                            <p className="text-[9px] text-blue-500 font-bold">You (Online)</p>
+                                        </div>
                                     </div>
-                                    <div className="min-w-0">
-                                        <p className="text-[12px] font-bold text-gray-800 truncate">{userInfo?.name || '나'} <span className="font-normal text-gray-500 ml-1">{userInfo?.position || '(미등록)'}</span></p>
-                                        <p className="text-[9px] text-blue-500 font-bold">You (Online)</p>
+                                ) : (
+                                    <div
+                                        onClick={() => window.dispatchEvent(new CustomEvent('open-user-registration'))}
+                                        className="text-[11px] text-gray-400 p-3 text-center border border-dashed border-gray-200 rounded-md cursor-pointer hover:bg-gray-50 hover:text-blue-500 transition-colors"
+                                    >
+                                        여기를 눌러 내 정보를 등록해주세요
                                     </div>
-                                </div>
+                                )}
                                 {visitorList.map((user, idx) => (
                                     <div key={idx} className="flex items-center grayscale opacity-80 hover:grayscale-0 hover:opacity-100 transition-all">
                                         <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-[10px] font-bold mr-2 shadow-sm">
@@ -1040,30 +1049,16 @@
             const [isUserModalOpen, setIsUserModalOpen] = React.useState(false);
 
             // Visitor List State
-            const [visitorList, setVisitorList] = React.useState([
-                { name: '이민수', position: '부장' },
-                { name: '김지은', position: '대리' },
-                { name: '박하늘', position: '사원' }
-            ]);
+            const [visitorList, setVisitorList] = React.useState([]);
 
+            // Listen to storage events to simulate very basic cross-tab "real-time"
+            // For true cross-device sharing, a real-time database (e.g., Firebase, Supabase) is required.
             React.useEffect(() => {
-                const interval = setInterval(() => {
-
-                    // Update visitor list
-                    setVisitorList(prev => {
-                        const newVisitorList = [...prev];
-                        const randomChange = Math.random();
-                        if (randomChange < 0.3 && newVisitorList.length > 1) { // Remove a visitor
-                            newVisitorList.splice(Math.floor(Math.random() * newVisitorList.length), 1);
-                        } else if (randomChange > 0.7 && newVisitorList.length < 5) { // Add a visitor
-                            const newName = ['최영희', '정수민', '강준호', '윤서연'][Math.floor(Math.random() * 4)];
-                            const newPosition = ['사원', '주임', '대리', '과장'][Math.floor(Math.random() * 4)];
-                            newVisitorList.push({ name: newName, position: newPosition });
-                        }
-                        return newVisitorList;
-                    });
-                }, 5000);
-                return () => clearInterval(interval);
+                const syncCrossTabInfo = () => {
+                    // Placeholder for future WebRTC or WebSocket logic
+                };
+                window.addEventListener('storage', syncCrossTabInfo);
+                return () => window.removeEventListener('storage', syncCrossTabInfo);
             }, []);
 
             // Notification State
