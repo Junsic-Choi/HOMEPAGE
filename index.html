@@ -115,6 +115,8 @@
             opacity: 1;
         }
 
+
+
         .toast-container {
             position: fixed;
             top: 24px;
@@ -183,6 +185,12 @@
         };
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
+
+        // -------------------------------------------------------------
+        // Auth Helper: Unique ID generator
+        // -------------------------------------------------------------
+        const generateUID = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
 
         const BOARDS = [
             { id: 'board1', name: '업무 공유', icon: 'zap' },
@@ -346,7 +354,7 @@
         };
 
         // 2. Post Editor Modal Component
-        const PostEditor = ({ isOpen, onClose, onSave, onDelete, activeBoardName, initialData, targetDate, isCalendar }) => {
+        const PostEditor = ({ isOpen, onClose, onSave, onDelete, activeBoardName, initialData, targetDate, isCalendar, userInfo }) => {
             const [title, setTitle] = React.useState('');
             const [content, setContent] = React.useState('');
             const [link, setLink] = React.useState('');
@@ -354,6 +362,11 @@
             const [endDate, setEndDate] = React.useState('');
             const [attachments, setAttachments] = React.useState([]);
             const isAlbum = activeBoardName === '앨범';
+
+            // We prioritize matching by authorId. If authorId doesn't exist on the post, fallback to exact name matching.
+            const isAuthor = !initialData || (userInfo && (
+                initialData.authorId ? initialData.authorId === userInfo.uid : initialData.author === `${userInfo.name} ${userInfo.position}`
+            ));
 
             // Reset when opened
             React.useEffect(() => {
@@ -477,7 +490,8 @@
                                 placeholder="제목 없음"
                                 value={title}
                                 onChange={e => setTitle(e.target.value)}
-                                className="w-full text-4xl font-bold bg-transparent border-none outline-none placeholder:text-gray-200 mb-8"
+                                disabled={!isAuthor}
+                                className="w-full text-4xl font-bold bg-transparent border-none outline-none placeholder:text-gray-200 mb-8 disabled:bg-transparent"
                             />
 
                             {/* Date Input Row (Only for Calendar events) */}
@@ -495,6 +509,7 @@
                                                 setStartDate(e.target.value);
                                                 if (endDate && e.target.value > endDate) setEndDate(e.target.value);
                                             }}
+                                            disabled={!isAuthor}
                                             className="bg-white border border-gray-200 focus:border-blue-500 rounded px-3 py-1.5 outline-none text-[13px] text-gray-700 min-w-[130px]"
                                         />
                                         <span className="text-gray-400 text-sm font-bold">~</span>
@@ -503,6 +518,7 @@
                                             value={endDate}
                                             onChange={e => setEndDate(e.target.value)}
                                             min={startDate}
+                                            disabled={!isAuthor}
                                             className="bg-white border border-gray-200 focus:border-blue-500 rounded px-3 py-1.5 outline-none text-[13px] text-gray-700 min-w-[130px]"
                                         />
                                     </div>
@@ -520,7 +536,8 @@
                                     placeholder="https://..."
                                     value={link}
                                     onChange={e => setLink(e.target.value)}
-                                    className="flex-1 bg-white border-none outline-none text-[14px] text-blue-600 placeholder:text-gray-300 py-1"
+                                    disabled={!isAuthor}
+                                    className="flex-1 bg-white border-none outline-none text-[14px] text-blue-600 placeholder:text-gray-300 py-1 disabled:bg-transparent"
                                 />
                             </div>
 
@@ -532,10 +549,12 @@
                                             <Icon name="image" className="w-4 h-4 mr-2 text-blue-500" />
                                             사진 첨부
                                         </div>
-                                        <label className="cursor-pointer px-3 py-1.5 bg-white border border-gray-200 text-sm font-medium text-gray-600 rounded hover:bg-gray-50 transition-colors shadow-sm cursor-pointer inline-block">
-                                            폴더에서 찾기
-                                            <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
-                                        </label>
+                                        {isAuthor && (
+                                            <label className="cursor-pointer px-3 py-1.5 bg-white border border-gray-200 text-sm font-medium text-gray-600 rounded hover:bg-gray-50 transition-colors shadow-sm cursor-pointer inline-block">
+                                                폴더에서 찾기
+                                                <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
+                                            </label>
+                                        )}
                                     </div>
 
                                     {/* Previews */}
@@ -544,13 +563,15 @@
                                             {attachments.map((att, idx) => (
                                                 <div key={idx} className="relative group w-20 h-20 flex-shrink-0 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
                                                     <img src={att.data} alt="preview" className="w-full h-full object-cover" />
-                                                    <button
-                                                        onClick={() => removeAttachment(idx)}
-                                                        className="absolute top-1 right-1 bg-black/60 backdrop-blur-sm text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
-                                                        title="사진 삭제"
-                                                    >
-                                                        <Icon name="x" className="w-3 h-3" />
-                                                    </button>
+                                                    {isAuthor && (
+                                                        <button
+                                                            onClick={() => removeAttachment(idx)}
+                                                            className="absolute top-1 right-1 bg-black/60 backdrop-blur-sm text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
+                                                            title="사진 삭제"
+                                                        >
+                                                            <Icon name="x" className="w-3 h-3" />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -562,14 +583,15 @@
                                 placeholder="자유롭게 내용을 입력하세요..."
                                 value={content}
                                 onChange={e => setContent(e.target.value)}
-                                className="w-full flex-1 resize-none bg-transparent border-none outline-none placeholder:text-gray-200 text-[16px] leading-relaxed"
+                                disabled={!isAuthor}
+                                className="w-full flex-1 resize-none bg-transparent border-none outline-none placeholder:text-gray-200 text-[16px] leading-relaxed disabled:bg-transparent"
                             ></textarea>
                         </div>
 
                         {/* Modal Footer */}
                         <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center gap-2 flex-shrink-0 bg-gray-50/30">
                             <div>
-                                {initialData && isCalendar && (
+                                {initialData && isCalendar && isAuthor && (
                                     <button
                                         onClick={() => {
                                             if (window.confirm('정말 삭제하시겠습니까?')) {
@@ -586,11 +608,13 @@
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md transition-colors font-medium">
-                                    취소
+                                    {isAuthor ? '취소' : '닫기'}
                                 </button>
-                                <button onClick={handleSave} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors shadow-sm font-semibold">
-                                    {initialData ? '수정 완료' : '페이지 등록'}
-                                </button>
+                                {isAuthor && (
+                                    <button onClick={handleSave} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors shadow-sm font-semibold">
+                                        {initialData ? '수정 완료' : '페이지 등록'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -649,15 +673,19 @@
                                 <span className="hover:underline cursor-pointer">상세 보기</span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <button onClick={() => onEditPost(post)} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
-                                    <Icon name="pencil" className="w-4 h-4 mr-1.5" />
-                                    수정
-                                </button>
-                                <button onClick={() => { if (window.confirm('정말 삭제하시겠습니까?')) onDeletePost(post.id); }} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
-                                    <Icon name="trash-2" className="w-4 h-4 mr-1.5" />
-                                    삭제
-                                </button>
-                                <div className="w-px h-4 bg-gray-200 mx-1"></div>
+                                {(userInfo && (post.authorId ? post.authorId === userInfo.uid : post.author === `${userInfo.name} ${userInfo.position}`)) && (
+                                    <>
+                                        <button onClick={() => onEditPost(post)} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+                                            <Icon name="pencil" className="w-4 h-4 mr-1.5" />
+                                            수정
+                                        </button>
+                                        <button onClick={() => { if (window.confirm('정말 삭제하시겠습니까?')) onDeletePost(post.id); }} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
+                                            <Icon name="trash-2" className="w-4 h-4 mr-1.5" />
+                                            삭제
+                                        </button>
+                                        <div className="w-px h-4 bg-gray-200 mx-1"></div>
+                                    </>
+                                )}
                                 <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md text-gray-400 hover:text-gray-600 transition-colors">
                                     <Icon name="x" className="w-5 h-5 stroke-[2]" />
                                 </button>
@@ -748,7 +776,7 @@
                                                             <span className="text-sm font-bold text-gray-800">{comment.author}</span>
                                                             <span className="text-[11px] text-gray-400">{comment.time}</span>
                                                         </div>
-                                                        {(comment.author === '나' || (userInfo && comment.author === `${userInfo.name} ${userInfo.position}`)) && editingCommentId !== comment.id && (
+                                                        {(userInfo && (comment.authorId ? comment.authorId === userInfo.uid : comment.author === `${userInfo.name} ${userInfo.position}`)) && editingCommentId !== comment.id && (
                                                             <div className="flex items-center gap-2 opacity-0 group-hover/comment:opacity-100 transition-opacity">
                                                                 <button
                                                                     onClick={() => handleEditStart(comment)}
@@ -1299,7 +1327,12 @@
             const [userInfo, setUserInfo] = React.useState(() => {
                 try {
                     const saved = localStorage.getItem('ws_user_info');
-                    return saved ? JSON.parse(saved) : null;
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        if (!parsed.uid) parsed.uid = generateUID(); // Retrofit existing users with UID
+                        return parsed;
+                    }
+                    return null;
                 } catch (e) { return null; }
             });
             const [isUserModalOpen, setIsUserModalOpen] = React.useState(false);
@@ -1484,7 +1517,8 @@
                         ...postData,
                         date: finalDate,
                         author: authorDisplay,
-                        authorEmail: authorEmail
+                        authorEmail: authorEmail,
+                        authorId: userInfo ? userInfo.uid : null
                     };
 
                     boardPostsRef.once('value').then(snapshot => {
@@ -1541,7 +1575,8 @@
                     id: Date.now(),
                     author: authorDisplay,
                     text: text,
-                    time: timeStr
+                    time: timeStr,
+                    authorId: userInfo ? userInfo.uid : null
                 };
 
                 const postCommentsRef = database.ref(`comments/${postId}`);
@@ -1652,6 +1687,7 @@
                         initialData={editingPost}
                         targetDate={targetDate}
                         isCalendar={currentBoard.id === 'board2'}
+                        userInfo={userInfo}
                     />
                     <PostDetail
                         isOpen={!!selectedPost}
@@ -1676,7 +1712,12 @@
                         onClose={() => setIsUserModalOpen(false)}
                         userInfo={userInfo}
                         onSave={(info) => {
-                            setUserInfo(info);
+                            // Ensure the user info has a UID, preserving the old one or creating a new one
+                            const updatedInfo = {
+                                ...info,
+                                uid: userInfo && userInfo.uid ? userInfo.uid : generateUID()
+                            };
+                            setUserInfo(updatedInfo);
                             addToast(`${info.name} ${info.position}님, 반갑습니다!`, 'success');
                         }}
                     />
